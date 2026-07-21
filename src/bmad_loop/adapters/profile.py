@@ -87,6 +87,11 @@ class CLIProfile:
     # that a `git worktree add` checkout omits; provision_worktree copies them in
     # from the main repo so isolated dev/review sessions can reach the MCP server.
     seed_files: tuple[str, ...] = ()
+    # Transport axis: "tmux" (default, uses the terminal multiplexer) or
+    # "stdio-jsonrpc" (drives the CLI's ACP/JSON-RPC server directly over
+    # stdin/stdout, bypassing the mux entirely). The latter is the Windows
+    # path for Goose: no native tmux re-implementation is required.
+    transport: str = "tmux"
 
     @property
     def hookless(self) -> bool:
@@ -182,6 +187,7 @@ def _parse_profile(doc: dict, source: str) -> CLIProfile:
         subagent_stop_without_transcript=bool(doc.get("subagent_stop_without_transcript", False)),
         first_run_note=str(doc.get("first_run_note", "")),
         seed_files=seed_files,
+        transport=str(doc.get("transport", "tmux")),
     )
 
 

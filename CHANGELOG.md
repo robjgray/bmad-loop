@@ -9,6 +9,13 @@ breaking changes may land in a minor release.
 
 ### Added
 
+- **Goose CLI support.** `bmad-loop init --cli goose` installs a hookless Goose
+  profile driven over the Agent Client Protocol on stdio (`goose acp`). The
+  `stdio-jsonrpc` transport axis on `CLIProfile` extends the existing transport
+  seam to CLIs that expose their own completion signal without a multiplexer —
+  the only path that works on Windows (no native tmux). `install_into` now
+  writes the user's chosen adapter name into the policy template on a
+  single-CLI greenfield install.
 - **`bmad-loop validate --json` (#205).** A stable, schema-versioned JSON document of the
   preflight: the `ok` verdict, the queue `mode`/`spec_folder`, per-severity `counts`, and every
   check as a flat emission-ordered finding. Each finding carries a **stable `check` id** —

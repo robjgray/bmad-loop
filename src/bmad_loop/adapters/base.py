@@ -5,9 +5,9 @@ attributes so the engine can reason about transport quality instead of
 treating every CLI as a dumb terminal:
 
 - injection:   how a prompt reaches the CLI
-               "tmux-initial-prompt" | "launch-flag" | "http"
+               "tmux-initial-prompt" | "launch-flag" | "http" | "stdio-jsonrpc"
 - observation: how turn/session completion is detected
-               "hook-signal" | "sse" | "transcript-poll"
+               "hook-signal" | "sse" | "transcript-poll" | "rpc-response"
 - state:       where session state is readable
                "local-jsonl" | "local-json-tree" | "remote"
 """

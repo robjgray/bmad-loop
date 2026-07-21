@@ -86,8 +86,51 @@ def test_builtin_profiles_load():
     assert opencode.usage_parser == "none"
     assert opencode.binary == "opencode"
     # every hook-driven built-in stays non-hookless
-    for name in sorted(set(profiles) - {"opencode-http"}):
+    for name in sorted(set(profiles) - {"opencode-http", "goose"}):
         assert profiles[name].hookless is False
+
+
+def test_goose_builtin_profile_loads():
+    profiles = load_profiles()
+    assert "goose" in profiles
+    goose = profiles["goose"]
+    assert goose.binary == "goose"
+    # Goose is driven over ACP stdio; the adapter observes completion from the
+    # JSON-RPC response, so no hook scripts are required.
+    assert goose.hooks.dialect == "none"
+    assert goose.hookless is True
+    assert goose.hooks.config_path == ""
+    assert goose.hooks.events == {}
+    assert goose.usage_parser == "none"
+    assert goose.skill_tree == ".agents/skills"
+    assert goose.prompt_template == "{prompt}"
+    assert goose.launch_args == ("run", "--output-format", "stream-json", "--text")
+    assert goose.bypass_args == ()
+    assert goose.model_flag == "--model"
+    assert goose.env.get("GOOSE_MODE") == "auto"
+    assert goose.transport == "stdio-jsonrpc"
+
+
+GOOSE_PROFILE = """
+name = "goose"
+binary = "goose"
+prompt_template = "{prompt}"
+launch_args = ["run", "--output-format", "stream-json", "--text"]
+transport = "stdio-jsonrpc"
+
+[hooks]
+dialect = "none"
+"""
+
+
+def test_goose_user_profile_parses(tmp_path):
+    profiles_dir = tmp_path / ".bmad-loop" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "goose.toml").write_text(GOOSE_PROFILE)
+    prof = load_profiles(tmp_path)["goose"]
+    assert prof.hooks.dialect == "none"
+    assert prof.hookless is True
+    assert prof.transport == "stdio-jsonrpc"
 
 
 def test_usage_grace_and_nudges_default_when_unset(tmp_path):

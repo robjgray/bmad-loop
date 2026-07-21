@@ -1,0 +1,37 @@
+# Goose CLI (https://github.com/aaif-goose/goose).
+#
+# Headless sessions are driven over the Agent Client Protocol (ACP) on stdio
+# (`goose acp`). The adapter observes completion from the JSON-RPC prompt
+# response, so this profile is hookless: no hook scripts or plugin config are
+# required for bmad-loop to operate.
+#
+# Headless permission mode: GOOSE_MODE=auto is set in [env]. Goose refuses to
+# run non-interactively in Approve/SmartApprove modes; Auto auto-allows tool
+# calls with Permission::AllowOnce. The default is already Auto, but we set it
+# explicitly for clarity.
+#
+# Prompt shape: launch_args carry the goose subcommand and flags; the
+# prompt_template is bare "{prompt}" so the rendered prompt lands as the
+# --text argument value for interactive escalation:
+#   goose run --output-format stream-json --text "<prompt>" [--model <model>]
+#
+# --no-session is intentionally NOT used: it causes a SQLite panic in v1.43.0
+# ("index out of bounds: the len is 28 but the index is 28"). Regular session
+# mode works fine.
+name = "goose"
+binary = "goose"
+prompt_template = "{prompt}"
+launch_args = ["run", "--output-format", "stream-json", "--text"]
+bypass_args = []
+model_flag = "--model"
+usage_parser = "none"
+transport = "stdio-jsonrpc"
+first_run_note = "ensure a provider is configured with `goose configure`"
+skill_tree = ".agents/skills"
+seed_files = []
+
+[env]
+GOOSE_MODE = "auto"
+
+[hooks]
+dialect = "none"

@@ -149,9 +149,29 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                 profile = get_profile(cfg.name, project)
             except ProfileError as e:
                 raise SystemExit(f"error: {e}") from e
-            if profile.hookless:
-                # Hookless profiles (opencode-http) are driven over HTTP/SSE —
-                # the tmux adapters below cannot host them.
+            transport = getattr(profile, "transport", "tmux")
+            if transport == "stdio-jsonrpc":
+                # stdio-JSON-RPC profiles (goose acp) are driven directly over
+                # stdin/stdout — no terminal multiplexer required. This is the
+                # Windows path: no native tmux re-implementation is needed.
+                from .adapters.goose_acp import GooseAcpAdapter, GooseDevAcpAdapter
+
+                common = dict(
+                    run_dir=run_dir,
+                    policy=policy,
+                    profile=profile,
+                    extra_args=cfg.extra_args,
+                    usage_grace_s=cfg.usage_grace_s,
+                    stop_without_result_nudges=cfg.stop_without_result_nudges,
+                )
+                by_cfg[key] = (
+                    GooseDevAcpAdapter(**common, paths=paths)
+                    if synthesizes
+                    else GooseAcpAdapter(**common)
+                )
+            elif profile.hookless:
+                # Hookless HTTP/SSE profiles (opencode-http) cannot use the tmux
+                # adapters below.
                 from .adapters.opencode_http import (
                     OpencodeDevAdapter,
                     OpencodeHttpAdapter,
@@ -176,7 +196,8 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                     raise SystemExit(f"error: {e}") from e
             else:
                 # Resolve and probe the shared multiplexer only when a profile
-                # actually uses it; hookless HTTP/SSE runs need no transport.
+                # actually uses it; hookless HTTP/SSE or stdio-JSON-RPC runs
+                # need no transport.
                 if mux is None:
                     mux = get_multiplexer()
                     if not mux_usable(mux):
@@ -430,24 +451,27 @@ def cmd_validate(args: argparse.Namespace) -> int:
         if profile.hookless:
             report.ok(
                 "adapter.hookless",
-                f"{profile.name}: hookless (HTTP/SSE transport) — no hook registration needed",
+                f"{profile.name}: hookless — no hook registration needed",
                 {"profile": profile.name},
             )
-            # The HTTP adapter needs httpx, which ships as an optional extra —
-            # surface a missing install here instead of at run start.
-            if importlib.util.find_spec("httpx") is not None:
-                report.ok(
-                    "adapter.httpx",
-                    f"httpx available for {profile.name}",
-                    {"profile": profile.name},
-                )
-            else:
-                report.fail(
-                    "adapter.httpx",
-                    f"{profile.name}: httpx not installed — "
-                    f"run `pip install 'bmad-loop[opencode]'`",
-                    {"profile": profile.name},
-                )
+            # The HTTP/SSE adapter (opencode-http) needs httpx, which ships as
+            # an optional extra; surface a missing install here instead of at
+            # run start. stdio-JSON-RPC hookless profiles (goose acp) need no
+            # HTTP library.
+            if profile.name in ("opencode-http", "opencode"):
+                if importlib.util.find_spec("httpx") is not None:
+                    report.ok(
+                        "adapter.httpx",
+                        f"httpx available for {profile.name}",
+                        {"profile": profile.name},
+                    )
+                else:
+                    report.fail(
+                        "adapter.httpx",
+                        f"{profile.name}: httpx not installed — "
+                        f"run `pip install 'bmad-loop[opencode]'`",
+                        {"profile": profile.name},
+                    )
             continue
         hook_config = project / profile.hooks.config_path
         hooks_ok = False

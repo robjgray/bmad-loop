@@ -83,6 +83,61 @@ def test_init_force_skills_flag(tmp_path):
     assert skill_md.read_text() != "CUSTOM"
 
 
+def test_init_single_cli_writes_name_to_policy(tmp_path):
+    """`init --cli goose` on a greenfield project writes a policy whose
+    `[adapter] name` matches the user's choice — the install path that
+    `bmad-loop init && bmad-loop run --story 1-1-a` follows for the Goose
+    MVP. Without this, a user who follows the official quickstart on
+    Windows ends up with `[adapter] name = "claude"` regardless of the
+    `--cli` they passed, and the run-time dispatch routes to the wrong
+    adapter (regression: bmad-loop was extended to support Goose as a
+    bundled profile, but init was still hardcoding the legacy default)."""
+    assert cli.main(["init", "--project", str(tmp_path), "--cli", "goose"]) == 0
+    policy = (tmp_path / ".bmad-loop" / "policy.toml").read_text(encoding="utf-8")
+    assert '[adapter]\nname = "goose"' in policy
+    # The template's `claude` default is gone (the substitution replaced it
+    # exactly once, not patched around it):
+    assert 'name = "claude"' not in policy
+    # Skills tree matches the bundled goose profile's skill_tree (.agents/skills,
+    # not .claude/skills), proving the policy's `[adapter] name` and the
+    # skill install destination are aligned.
+    assert (tmp_path / ".agents" / "skills" / "bmad-loop-sweep" / "SKILL.md").is_file()
+    assert not (tmp_path / ".claude").exists()
+
+
+def test_init_no_args_keeps_claude_default(tmp_path):
+    """Back-compat: `init` with no `--cli` on a greenfield project writes
+    `name = "claude"`, the pre-Goose default. Pinned because the previous
+    test pins the *change* — flipping the unconditional default would
+    break the existing `test_init_without_policy_defaults_to_claude` and
+    surprise users who set up bmad-loop without a profile choice."""
+    assert cli.main(["init", "--project", str(tmp_path)]) == 0
+    policy = (tmp_path / ".bmad-loop" / "policy.toml").read_text(encoding="utf-8")
+    assert 'name = "claude"' in policy
+
+
+def test_init_multiple_clis_keeps_template_default(tmp_path):
+    """`init --cli claude --cli codex` (multi-CLI per-stage config) keeps
+    the template's `name = "claude"` default: per-stage overrides in
+    `[adapter.dev]` / `[adapter.review]` / `[adapter.triage]` are the
+    user's lever, and silently substituting the first --cli's name would
+    misrepresent the still-unconfigured base."""
+    rc = cli.main(
+        [
+            "init",
+            "--project",
+            str(tmp_path),
+            "--cli",
+            "claude",
+            "--cli",
+            "codex",
+        ]
+    )
+    assert rc == 0
+    policy = (tmp_path / ".bmad-loop" / "policy.toml").read_text(encoding="utf-8")
+    assert 'name = "claude"' in policy
+
+
 def test_dry_run_renders_per_stage_commands(project, capsys):
     write_sprint(project, {"epic-1": "backlog", "1-1-a": "ready-for-dev"})
     _write_policy(project.project)
@@ -1320,6 +1375,51 @@ def test_make_adapters_hookless_triage_dispatches_http_adapter(project, monkeypa
     assert adapters["triage"].profile.name == "opencode-http"
     assert isinstance(adapters["dev"], GenericDevAdapter)
     assert adapters["dev"] is adapters["review"]  # (cfg, synthesizes) sharing intact
+
+
+def test_make_adapters_stdio_jsonrpc_synthesizing_roles_get_acp_adapter(project, monkeypatch):
+    """Goose (transport="stdio-jsonrpc", dialect="none") routes dev/review to
+    GooseDevAcpAdapter — the _DevSynthesisMixin composed over the ACP transport
+    — sharing one instance via the (cfg, synthesizes) key, while triage on the
+    same config gets a separate plain GooseAcpAdapter (it reads a real
+    result.json). The stdio-JSON-RPC transport must not resolve a multiplexer
+    (it owns the subprocess directly) and must not require httpx (that gate is
+    opencode-http-specific). Mirrors the opencode-http dev/review test."""
+    from bmad_loop.adapters.goose_acp import GooseAcpAdapter, GooseDevAcpAdapter
+
+    def no_mux():
+        raise AssertionError("stdio-jsonrpc adapters must not resolve a multiplexer")
+
+    monkeypatch.setattr(mux_mod, "get_multiplexer", no_mux)
+    # Defensive: the opencode-http httpx gate is a sibling branch, but assert
+    # nothing in the goose dispatch path imports it. A future refactor that
+    # accidentally couples the two is a regression.
+    import bmad_loop.cli as cli_mod
+
+    original_import = cli_mod.importlib.import_module
+
+    def guarded(name, *args, **kwargs):
+        if name.startswith("httpx"):
+            raise AssertionError("stdio-jsonrpc dispatch must not import httpx")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(cli_mod.importlib, "import_module", guarded)
+
+    install_bmad_config(project)
+    _write_policy(project.project, '[adapter]\nname = "goose"\n')
+    pol = policy_mod.load(project.project / ".bmad-loop" / "policy.toml")
+    adapters = cli._make_adapters(
+        project.project, project.project / ".bmad-loop" / "runs" / "r", pol
+    )
+    assert isinstance(adapters["dev"], GooseDevAcpAdapter)
+    assert adapters["dev"] is adapters["review"]  # (cfg, synthesizes) sharing intact
+    assert adapters["dev"].paths.project == project.project
+    assert adapters["dev"].profile.name == "goose"
+    assert adapters["dev"].profile.transport == "stdio-jsonrpc"
+    assert isinstance(adapters["triage"], GooseAcpAdapter)
+    assert not isinstance(adapters["triage"], GooseDevAcpAdapter)
+    assert adapters["triage"] is not adapters["dev"]
+    assert adapters["triage"].profile.name == "goose"
 
 
 def test_make_adapters_refuses_unusable_mux(project, monkeypatch):
@@ -2985,7 +3085,7 @@ def test_validate_hookless_profile_notes_no_hook_registration(project, capsys):
 
     cli.cmd_validate(args)
     text = _validate_output(capsys)
-    assert "opencode-http: hookless (http/sse transport)" in text
+    assert "opencode-http: hookless" in text
     assert "hooks not registered for opencode-http" not in text
     # httpx ships in the dev group, so the extra-dependency gate passes here
     assert "httpx available for opencode-http" in text
@@ -3004,7 +3104,7 @@ def test_validate_hookless_dev_review_is_runnable(project, capsys):
 
     cli.cmd_validate(args)
     text = _validate_output(capsys)
-    assert "opencode-http: hookless (http/sse transport)" in text
+    assert "opencode-http: hookless" in text
     assert "cannot drive the dev/review roles" not in text
     assert "phase 4" not in text
 
@@ -3030,6 +3130,37 @@ def test_validate_hookless_profile_flags_missing_httpx(project, capsys, monkeypa
     text = _validate_output(capsys)
     assert "httpx not installed" in text
     assert "bmad-loop[opencode]" in text
+
+
+def test_validate_stdio_jsonrpc_profile_notes_no_httpx_check(project, capsys, monkeypatch):
+    """Goose (stdio-jsonrpc) is hookless and shares the opencode branch shape,
+    but its adapter has no httpx dependency — validate must not raise the
+    'httpx not installed' FAIL even when httpx is missing. The preflight must
+    still note the hookless profile and not require any hook registration."""
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name == "httpx":
+            return None  # simulate the opencode extra NOT being installed
+        return real_find_spec(name, *args, **kwargs)
+
+    install_bmad_config(project)
+    _write_policy(project.project, '[adapter]\nname = "goose"\n')
+    monkeypatch.setattr(cli.importlib.util, "find_spec", fake_find_spec)
+    args = argparse.Namespace(project=str(project.project), spec=None)
+
+    cli.cmd_validate(args)
+    text = _validate_output(capsys)
+    assert "goose: hookless" in text
+    # no httpx requirement on the stdio-jsonrpc path — this is the regression
+    # we are pinning: a previous version gated httpx on `profile.hookless`
+    # alone, which would FAIL validate for goose on a host without opencode.
+    assert "httpx not installed" not in text
+    assert "bmad-loop[opencode]" not in text
+    # the hook-config branch must NOT fire on a hookless profile either
+    assert "hooks not registered for goose" not in text
 
 
 OPENCODE_QUALIFIED_POLICY = '[adapter]\nname = "opencode"\nmodel = "anthropic/claude-haiku-4-5"\n'
@@ -3388,8 +3519,7 @@ def test_external_backend_failure_is_a_warning_not_a_note(mux_registry, monkeypa
     report.extend([finding])
     report.render()
     assert capsys.readouterr().out == (
-        "  ok:   warning: external mux backend 'brokenmux' failed to load: "
-        "ImportError: no ghost\n"
+        "  ok:   warning: external mux backend 'brokenmux' failed to load: ImportError: no ghost\n"
     )
 
 

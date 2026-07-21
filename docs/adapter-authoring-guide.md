@@ -366,6 +366,7 @@ resolves to `claude`.
 | `subagent_stop_without_transcript` |          | `false`            | Set `true` for CLIs that fire the turn-end hook for _subagent_ turns too, with an empty `transcriptPath` and a tool-use session id (copilot's `agentStop`). A `Stop` carrying no transcript is then treated as a subagent stop and ignored, so the main session's real turn-end drives completion. Leave `false` and every `Stop` is the main turn-end. |
 | `first_run_note`                   |          | `""`               | Human note printed by `init` about a manual first-run/auth step this CLI needs.                                                                                                                                                                                                                                                                         |
 | `seed_files`                       |          | `()`               | Project-relative gitignored configs (MCP/CLI settings) a `git worktree add` checkout omits; `provision_worktree` copies them into isolated dev/review worktrees. Must be relative.                                                                                                                                                                      |
+| `transport`                        |          | `tmux`             | Transport axis: `tmux` (default, uses the terminal multiplexer) or `stdio-jsonrpc` (drives the CLI's ACP/JSON-RPC server directly over stdin/stdout, bypassing the mux entirely). The latter is the Windows path for Goose: no native tmux re-implementation is required.                                                                               |
 
 ### `HookSpec` (the `[hooks]` table)
 
@@ -422,8 +423,8 @@ The contract is the `CodingCLIAdapter` ABC in
 Set these class attributes so the engine can reason about transport quality
 instead of treating every CLI as a dumb terminal:
 
-- `injection` — how a prompt reaches the CLI: `tmux-initial-prompt` | `launch-flag` | `http`.
-- `observation` — how completion is detected: `hook-signal` | `sse` | `transcript-poll`.
+- `injection` — how a prompt reaches the CLI: `tmux-initial-prompt` | `launch-flag` | `http` | `stdio-jsonrpc`.
+- `observation` — how completion is detected: `hook-signal` | `sse` | `transcript-poll` | `rpc-response`.
 - `state` — where session state is readable: `local-jsonl` | `local-json-tree` | `remote`.
 
 ### The data contracts
@@ -524,3 +525,8 @@ when absent, zero tokens spent.
 - [`adapters/generic.py`](../src/bmad_loop/adapters/generic.py) — the tmux +
   hook-signal adapter to reuse with a profile rather than subclass; also home of
   the `_ResultFileMixin` / `_DevSynthesisMixin` seams.
+- [`adapters/goose_acp.py`](../src/bmad_loop/adapters/goose_acp.py) — the
+  shipped non-tmux stdio-JSON-RPC adapter: drives `goose acp` over stdin/stdout
+  (`injection = "stdio-jsonrpc"`, `observation = "rpc-response"`,
+  `state = "remote"`). The only adapter path that works on Windows without a
+  native tmux.
