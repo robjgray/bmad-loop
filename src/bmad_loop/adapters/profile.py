@@ -194,13 +194,35 @@ def _load_toml(text: str, source: str) -> CLIProfile:
 
 
 def load_profiles(project: Path | None = None) -> dict[str, CLIProfile]:
-    """Packaged built-ins, overlaid by <project>/.bmad-loop/profiles/*.toml."""
+    """Packaged built-ins, overlaid by entry-point-registered profiles from
+    co-installed adapter packages, overlaid by
+    <project>/.bmad-loop/profiles/*.toml. Precedence (highest first):
+    user-profiles, entry-point profiles, built-ins — so a project-local
+    override always wins, and an adapter package's bundled profile fills a
+    gap in the built-ins without shadowing a user's customization."""
     profiles: dict[str, CLIProfile] = {}
     packaged = resources.files("bmad_loop.data").joinpath("profiles")
     for entry in sorted(packaged.iterdir(), key=lambda e: e.name):
         if entry.name.endswith(".toml"):
             profile = _load_toml(entry.read_text(encoding="utf-8"), entry.name)
             profiles[profile.name] = profile
+    # Entry-point-registered profiles from co-installed adapter packages
+    # (bmad_loop.cli_adapters entry-point group). A broken adapter package
+    # must not break profile loading — skip on any error.
+    try:
+        from .registry import registered_profiles
+
+        for name, (pkg, filename) in registered_profiles().items():
+            if name not in profiles:  # built-ins win on name collision
+                try:
+                    entry = resources.files(pkg).joinpath(filename)
+                    profiles[name] = _load_toml(
+                        entry.read_text(encoding="utf-8"), f"{pkg}/{filename}"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass  # broken adapter profile must not break bmad-loop
+    except ImportError:
+        pass
     if project is not None:
         user_dir = project / USER_PROFILES_REL
         if user_dir.is_dir():
