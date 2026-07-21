@@ -696,7 +696,17 @@ def install_into(
         policy_path.write_text(legacy_policy.read_text(encoding="utf-8"), encoding="utf-8")
         print(f"  migrated policy: {legacy_policy} -> {policy_path}")
     else:
-        policy_path.write_text(POLICY_TEMPLATE, encoding="utf-8")
+        # Substitute the chosen CLI name into the template when exactly one
+        # --cli is passed; multiple CLIs (per-stage config) keep the default.
+        policy_text = POLICY_TEMPLATE
+        if len(clis) == 1:
+            chosen = clis[0]
+            policy_text = policy_text.replace(
+                'name = "claude"              # claude | codex',
+                f'name = "{chosen}"             # claude | codex',
+                1,
+            )
+        policy_path.write_text(policy_text, encoding="utf-8")
         print(f"  policy written: {policy_path}")
 
     # 5. gitignore generated/machine-local state: per-run state (.bmad-loop/runs/),
