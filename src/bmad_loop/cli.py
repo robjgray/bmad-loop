@@ -455,7 +455,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         if profile.hookless:
             # An out-of-tree adapter registered for this profile name owns
             # its own dependencies (the httpx check below is opencode-http
-            # only); built-in hookless profiles are driven over HTTP/SSE.
+            # only); built-in hookless profiles without a registered adapter
+            # are driven over HTTP/SSE.
             extra = "" if get_cli_adapter(profile.name) else " (HTTP/SSE transport)"
             report.ok(
                 "adapter.hookless",
@@ -881,10 +882,19 @@ def _render_invocation(pol, project: Path, role: str, prompt: str) -> str:
     cfg = pol.adapter.resolved(role)
     profile = get_profile(cfg.name, project)
     if profile.hookless:
-        # Hookless transport — there is no shell invocation to print. Render
-        # the real sequence (per-session server spawn or subprocess + API/RPC
-        # prompt) instead of a fake argv that run would never execute.
+        # Hookless transport — there is no shell invocation to print. An
+        # out-of-tree adapter registered for this profile name owns its own
+        # transport (HTTP/SSE, stdio JSON-RPC, etc.); render a transport-
+        # agnostic placeholder so the dry-run doesn't print a command shape
+        # that only applies to the built-in opencode-http adapter.
         model = f" model={cfg.model}" if cfg.model else ""
+        if get_cli_adapter(profile.name):
+            return (
+                f"{profile.binary} <hookless adapter> "
+                f'→ prompt "{profile.render_prompt(prompt)}"'
+                f"{model}"
+            )
+        # Built-in hookless (opencode-http): HTTP/SSE server spawn + API prompt.
         return (
             f"{profile.binary} serve --hostname 127.0.0.1 --port <auto> "
             f'(cwd=<worktree>) → POST /session → prompt_async "{profile.render_prompt(prompt)}"'
@@ -2299,7 +2309,7 @@ def main(argv: list[str] | None = None) -> int:
     probe_p.add_argument(
         "cli",
         help="CLI profile name (any hooked profile: claude, codex, gemini, copilot, antigravity; "
-        "hookless profiles like opencode-http are HTTP-driven — nothing to probe)",
+        "hookless profiles are transport-driven (HTTP/SSE, stdio JSON-RPC, etc.) — nothing to probe)",
     )
     probe_p.add_argument(
         "--probe",
