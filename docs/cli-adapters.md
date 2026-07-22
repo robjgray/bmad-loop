@@ -12,18 +12,18 @@ external adapter.
 A CLI adapter is a class implementing
 [`CodingCLIAdapter`](src/bmad_loop/adapters/base.py) — the methods the engine
 calls to start, observe, and tear down a session. Bundled adapters live in
-`src/bmad_loop/adapters/`. The registry is the same idea as the multiplexer
-backend registry (`docs/multiplexer-backends.md`), one entry-point group per
-seam: an out-of-tree adapter package advertises a module under
-`bmad_loop.cli_adapters`, and importing that module runs
+`src/bmad_loop/adapters/`. The registration mechanism is the same shared
+entry-point scan that the multiplexer backend registry uses
+(`docs/multiplexer-backends.md`): an out-of-tree adapter package advertises a
+module under `bmad_loop.cli_adapters`, and importing that module runs
 `register_cli_adapter(profile_name=..., base_factory=..., dev_factory=...)`
 which makes the adapter selectable by profile name.
 
 The dispatch site is
 [`_make_adapters`](src/bmad_loop/cli.py): for every hookless profile (one
 whose adapter observes completion itself instead of via hook scripts), it
-looks up the registered factory by `profile.name` and uses it. If no factory
-is registered, it falls back to the in-tree `opencode-http` adapter — the only
+looks up the registered factory pair by `profile.name` and uses it. If no
+factory is registered, it falls back to the in-tree `opencode-http` adapter — the only
 bundled hookless adapter today. Hooked profiles keep using the
 session-multiplexer path unchanged.
 
@@ -49,7 +49,10 @@ Three pieces, all in one Python package:
    Importing the module must call
    `register_cli_adapter(profile_name=..., base_factory=..., dev_factory=...,
    profile_package=..., profile_filename=...)` — typically as a
-   module-level side effect.
+   module-level side effect. The registration function lives in
+   `bmad_loop.adapters.profile` (alongside the profile TOML loader), and
+   the entry-point scan is shared with `bmad_loop.mux_backends` via
+   `bmad_loop.adapters._entrypoints`.
 
 A complete reference is
 **[bmad-loop-adapter-goose](https://github.com/robjgray/bmad-loop-adapter-goose)**,
@@ -75,6 +78,6 @@ Two operational notes that apply to any external adapter:
   `opencode-http` adapter and the failure is recorded in
   `bmad-loop validate`; the fix is reinstalling or upgrading the adapter.
 - **No new core seam is required for a new CLI.** A new adapter is
-  installable against any bmad-loop release that ships the registry — it
-  does not need a matching engine change, and the engine does not need a
-  matching code change to dispatch to it.
+  installable against any bmad-loop release that ships the entry-point scan
+  — it does not need a matching engine change, and the engine does not need
+  a matching code change to dispatch to it.

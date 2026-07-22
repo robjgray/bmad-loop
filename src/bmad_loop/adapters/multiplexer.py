@@ -32,6 +32,8 @@ import functools
 import importlib.metadata
 import os
 import sys
+
+from ._entrypoints import scan_entry_points as _scan_entry_points, reset_group as _reset_group
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -317,11 +319,13 @@ def _load_builtin_backends() -> None:
 
 
 # The entry-point group an out-of-tree backend package advertises its module
-# under; importing the module runs its register_multiplexer call. Loader state:
-# scanned-once flag + per-entry-point failure reasons for mux/validate to show.
+# under; importing the module runs its register_multiplexer call. Loader state
+# is managed by the shared _entrypoints utility (one scan per group per
+# process); the names below are kept as compatibility shims for tests that
+# reach in directly.
 MUX_BACKENDS_GROUP = "bmad_loop.mux_backends"
-_EXTERNALS_LOADED = False
-_EXTERNAL_ERRORS: dict[str, str] = {}
+_EXTERNALS_LOADED = False  # compat shim — real state is in _entrypoints
+_EXTERNAL_ERRORS: dict[str, str] = {}  # compat shim — real state is in _entrypoints
 
 
 def _load_external_backends() -> None:
@@ -331,25 +335,26 @@ def _load_external_backends() -> None:
     stays first-wins on a name collision) and selection precedence is unchanged.
 
     A broken third-party distribution must never break backend selection:
-    failures are recorded in ``_EXTERNAL_ERRORS`` (surfaced by ``bmad-loop mux``
-    and the ``validate`` preflight via :func:`external_backend_errors`), not
-    raised. Unlike ``_BUILTINS_LOADED``, the loaded-flag is set up front: a
-    third-party import failure is not transient, and retrying on every
-    selection would re-import (and re-fail) each time."""
+    failures are recorded and surfaced by ``bmad-loop mux`` and the
+    ``validate`` preflight via :func:`external_backend_errors`, not raised.
+
+    Delegates to the shared :mod:`._entrypoints` utility for the scan mechanics.
+    The ``_EXTERNALS_LOADED`` / ``_EXTERNAL_ERRORS`` module-level names are kept
+    as compatibility shims — tests snapshot/restore them to isolate the
+    registry, so this function syncs them with the shared utility's state.
+    """
     global _EXTERNALS_LOADED
     if _EXTERNALS_LOADED:
         return
+    # Reset the shared utility's state so a re-armed scan (tests set
+    # _EXTERNALS_LOADED = False) actually re-scans.
+    _reset_group(MUX_BACKENDS_GROUP)
+    errors = _scan_entry_points(
+        MUX_BACKENDS_GROUP, entry_points_fn=importlib.metadata.entry_points
+    )
+    _EXTERNAL_ERRORS.clear()
+    _EXTERNAL_ERRORS.update(errors)
     _EXTERNALS_LOADED = True
-    try:
-        eps = importlib.metadata.entry_points(group=MUX_BACKENDS_GROUP)
-    except Exception as exc:  # noqa: BLE001 — diagnostics path, never crash selection
-        _EXTERNAL_ERRORS["<entry-point scan>"] = f"{type(exc).__name__}: {exc}"
-        return
-    for ep in eps:
-        try:
-            ep.load()  # module import runs register_multiplexer(...)
-        except Exception as exc:  # noqa: BLE001 — one bad package must not hide the rest
-            _EXTERNAL_ERRORS[ep.name] = f"{type(exc).__name__}: {exc}"
 
 
 def external_backend_errors() -> dict[str, str]:

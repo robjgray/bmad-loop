@@ -207,22 +207,20 @@ def load_profiles(project: Path | None = None) -> dict[str, CLIProfile]:
             profile = _load_toml(entry.read_text(encoding="utf-8"), entry.name)
             profiles[profile.name] = profile
     # Entry-point-registered profiles from co-installed adapter packages
-    # (bmad_loop.cli_adapters entry-point group). A broken adapter package
+    # (bmad_loop.cli_adapters entry-point group). The entry-point scan loads
+    # each adapter's __init__ module, which calls register_cli_adapter() as a
+    # side effect, populating _ADAPTER_PROFILES. A broken adapter package
     # must not break profile loading — skip on any error.
-    try:
-        from .registry import registered_profiles
-
-        for name, (pkg, filename) in registered_profiles().items():
-            if name not in profiles:  # built-ins win on name collision
-                try:
-                    entry = resources.files(pkg).joinpath(filename)
-                    profiles[name] = _load_toml(
-                        entry.read_text(encoding="utf-8"), f"{pkg}/{filename}"
-                    )
-                except Exception:  # noqa: BLE001
-                    pass  # broken adapter profile must not break bmad-loop
-    except ImportError:
-        pass
+    _scan_cli_adapters()  # idempotent — populates _ADAPTER_PROFILES
+    for name, (pkg, filename) in _ADAPTER_PROFILES.items():
+        if name not in profiles:  # built-ins win on name collision
+            try:
+                entry = resources.files(pkg).joinpath(filename)
+                profiles[name] = _load_toml(
+                    entry.read_text(encoding="utf-8"), f"{pkg}/{filename}"
+                )
+            except Exception:  # noqa: BLE001
+                pass  # broken adapter profile must not break bmad-loop
     if project is not None:
         user_dir = project / USER_PROFILES_REL
         if user_dir.is_dir():
@@ -238,3 +236,74 @@ def get_profile(name: str, project: Path | None = None) -> CLIProfile:
     if profile is None:
         raise ProfileError(f"unknown CLI profile: {name!r} (available: {sorted(profiles)})")
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Out-of-tree CLI adapter registration
+#
+# Co-installed adapter packages register their adapter classes and profile
+# TOML metadata here via register_cli_adapter(), called from their __init__
+# module at import time. The entry-point scan (bmad_loop.cli_adapters group)
+# triggers those imports. This is the same pattern as mux_backends — the
+# shared _entrypoints utility owns the scan mechanics; this module owns the
+# registration data.
+# ---------------------------------------------------------------------------
+
+# The entry-point group for out-of-tree CLI adapters.
+CLI_ADAPTERS_GROUP = "bmad_loop.cli_adapters"
+
+# profile_name -> (base_factory, dev_factory) — the two adapter classes
+# (base = triage, dev = dev/review with spec synthesis).
+_CLI_ADAPTERS: dict[str, tuple[type, type]] = {}
+
+# profile_name -> (package, filename) — for entry-point-registered profile
+# TOMLs discovered by load_profiles.
+_ADAPTER_PROFILES: dict[str, tuple[str, str]] = {}
+
+
+def register_cli_adapter(
+    profile_name: str,
+    *,
+    base_factory: type,
+    dev_factory: type,
+    profile_package: str | None = None,
+    profile_filename: str | None = None,
+) -> None:
+    """Register adapter classes for a hookless profile.
+
+    Out-of-tree adapter packages call this at import time (triggered by the
+    ``bmad_loop.cli_adapters`` entry-point scan). ``base_factory`` is the
+    plain adapter (triage role); ``dev_factory`` is the dev/review adapter
+    (takes a ``paths`` kwarg for spec synthesis). ``profile_package`` +
+    ``profile_filename`` optionally register a packaged profile TOML that
+    :func:`load_profiles` discovers alongside the built-in profiles.
+    """
+    _CLI_ADAPTERS[profile_name] = (base_factory, dev_factory)
+    if profile_package and profile_filename:
+        _ADAPTER_PROFILES[profile_name] = (profile_package, profile_filename)
+
+
+def get_cli_adapter(profile_name: str) -> tuple[type, type] | None:
+    """Return ``(base_factory, dev_factory)`` for ``profile_name``, or None."""
+    _scan_cli_adapters()
+    return _CLI_ADAPTERS.get(profile_name)
+
+
+def _scan_cli_adapters() -> None:
+    """Trigger the entry-point scan for ``bmad_loop.cli_adapters`` if it
+    hasn't run yet. Each EP's module import calls register_cli_adapter() as a
+    side effect, populating ``_CLI_ADAPTERS`` and ``_ADAPTER_PROFILES``.
+    Idempotent — the shared utility scans once per process.
+    """
+    from ._entrypoints import scan_entry_points
+    scan_entry_points(CLI_ADAPTERS_GROUP)
+
+
+def external_adapter_errors() -> dict[str, str]:
+    """Per-EP load errors for the ``bmad_loop.cli_adapters`` group.
+
+    Empty when all adapter packages loaded (or none are installed). For
+    diagnostics — surfaced by ``bmad-loop validate``.
+    """
+    from ._entrypoints import entry_point_errors
+    return entry_point_errors(CLI_ADAPTERS_GROUP)

@@ -31,7 +31,7 @@ from . import (
     verify,
 )
 from .adapters.base import CodingCLIAdapter
-from .adapters.registry import get_cli_adapter
+from .adapters.profile import get_cli_adapter, external_adapter_errors
 from .checks import Finding, ValidationReport
 
 # The --json document builders live in documents.py (the library-level projection
@@ -165,12 +165,13 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                     usage_grace_s=cfg.usage_grace_s,
                     stop_without_result_nudges=cfg.stop_without_result_nudges,
                 )
-                factory = get_cli_adapter(profile.name)
-                if factory is not None:
+                adapter = get_cli_adapter(profile.name)
+                if adapter is not None:
+                    base_cls, dev_cls = adapter
                     by_cfg[key] = (
-                        factory.dev(**common, paths=paths)
+                        dev_cls(**common, paths=paths)
                         if synthesizes
-                        else factory.base(**common)
+                        else base_cls(**common)
                     )
                 else:
                     from .adapters.opencode_http import (
@@ -338,6 +339,17 @@ def _platform_preflight() -> list[Finding]:
                 "mux.external-backend",
                 "warning",
                 f"external mux backend '{ep_name}' failed to load: {reason}",
+                {"entry_point": ep_name, "error": reason},
+            )
+        )
+
+    # Surface broken CLI adapter packages (same pattern as mux backends above).
+    for ep_name, reason in sorted(external_adapter_errors().items()):
+        found.append(
+            Finding(
+                "adapter.external-adapter",
+                "warning",
+                f"external adapter '{ep_name}' failed to load: {reason}",
                 {"entry_point": ep_name, "error": reason},
             )
         )
