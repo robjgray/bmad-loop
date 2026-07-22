@@ -36,6 +36,7 @@ _MUX_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # never start with `backend =` or the anchor match would hit them first.
 _TOML_SECTION_RE = re.compile(r"^\s*\[(?P<name>[^\]]+)\]\s*(?:#.*)?$")
 _MUX_KEY_RE = re.compile(r"^\s*#?\s*backend\s*=")
+_ADAPTER_KEY_RE = re.compile(r'^\s*#?\s*name\s*=')
 
 # Deprecated [engine] keys, folded into [plugins.unity] at load time. The
 # game-engine layer is now a plugin; [engine] is a one-release compatibility
@@ -1126,6 +1127,65 @@ def write_mux_backend(path: Path, name: str | None) -> None:
         raise PolicyError(
             f"internal error: rewriting {path} would read back "
             f"mux.backend = {parsed.mux.backend!r}, expected {(name or '')!r}"
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".toml.tmp")
+    tmp.write_bytes(result.encode("utf-8"))
+    atomic_replace(tmp, path)
+
+
+def write_adapter_name(path: Path, name: str) -> None:
+    """Set the ``[adapter] name`` key in the policy file at ``path``,
+    preserving every other byte — same line-replace approach as
+    :func:`write_mux_backend`. Called by ``bmad-loop init`` when a single
+    ``--cli`` profile is passed, so the user doesn't have to hand-edit
+    policy.toml just to switch from the default ``claude`` to their CLI.
+    """
+    if not _MUX_NAME_RE.match(name):
+        raise PolicyError(
+            f"adapter.name must be a profile name (letters, digits, . _ -): got {name!r}"
+        )
+    text = path.read_bytes().decode("utf-8") if path.is_file() else POLICY_TEMPLATE
+    new_line = f'name = "{name}"'
+
+    section = ""
+    replaced = False
+    adapter_header_at: int | None = None
+    out: list[str] = []
+    for line in text.splitlines(keepends=True):
+        header = _TOML_SECTION_RE.match(line)
+        if header:
+            section = header.group("name").strip()
+            out.append(line)
+            if section == "adapter" and adapter_header_at is None:
+                adapter_header_at = len(out) - 1
+            continue
+        if not replaced and section == "adapter" and _ADAPTER_KEY_RE.match(line):
+            stripped = line.rstrip("\r\n")
+            ending = line[len(stripped):] or "\n"
+            # keep trailing comment if present
+            hash_idx = stripped.find("#", stripped.index("="))
+            trailing = ("  " + stripped[hash_idx:]) if hash_idx != -1 else ""
+            out.append(new_line + trailing + ending)
+            replaced = True
+            continue
+        out.append(line)
+    if not replaced:
+        if adapter_header_at is not None:
+            out.insert(adapter_header_at + 1, new_line + "\n")
+        else:
+            if out and not out[-1].endswith("\n"):
+                out.append("\n")
+            out.append(f"\n[adapter]\n{new_line}\n")
+    result = "".join(out)
+
+    # Round-trip guard
+    parsed = loads(result)
+    if parsed.adapter.name != name:
+        raise PolicyError(
+            f"internal error: rewriting {path} would read back "
+            f"adapter.name = {parsed.adapter.name!r}, expected {name!r}"
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)

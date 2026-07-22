@@ -25,7 +25,7 @@ from pathlib import Path
 
 from .adapters.profile import ALIASES, CLIProfile, ProfileError, load_profiles
 from .checks import Finding
-from .policy import POLICY_TEMPLATE
+from .policy import POLICY_TEMPLATE, write_adapter_name
 from .process_host import get_process_host
 
 HOOK_SCRIPT_REL = ".bmad-loop/bmad_loop_hook.py"
@@ -698,6 +698,14 @@ def install_into(
     else:
         policy_path.write_text(POLICY_TEMPLATE, encoding="utf-8")
         print(f"  policy written: {policy_path}")
+
+    # If a single CLI profile was passed, set [adapter] name to it so the user
+    # doesn't have to hand-edit policy.toml just to switch from the default
+    # "claude" to their CLI. When multiple --cli flags are passed the user is
+    # setting up a mixed-CLI project and needs to choose role mappings manually.
+    if len(profiles) == 1 and policy_path.is_file():
+        write_adapter_name(policy_path, profiles[0].name)
+        print(f"  policy adapter: {profiles[0].name}")
 
     # 5. gitignore generated/machine-local state: per-run state (.bmad-loop/runs/),
     # the game-engine plugins' rebuildable caches, e.g. the per-worktree Unity
