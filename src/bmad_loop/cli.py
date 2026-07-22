@@ -190,7 +190,7 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                         raise SystemExit(f"error: {e}") from e
             else:
                 # Resolve and probe the shared multiplexer only when a profile
-                # actually uses it; hookless HTTP/SSE runs need no transport.
+                # actually uses it; hookless profiles need no transport.
                 if mux is None:
                     mux = get_multiplexer()
                     if not mux_usable(mux):
@@ -881,9 +881,9 @@ def _render_invocation(pol, project: Path, role: str, prompt: str) -> str:
     cfg = pol.adapter.resolved(role)
     profile = get_profile(cfg.name, project)
     if profile.hookless:
-        # HTTP/SSE transport — there is no shell invocation to print. Render
-        # the real sequence (per-session server spawn + API prompt) instead of
-        # a fake argv that run would never execute.
+        # Hookless transport — there is no shell invocation to print. Render
+        # the real sequence (per-session server spawn or subprocess + API/RPC
+        # prompt) instead of a fake argv that run would never execute.
         model = f" model={cfg.model}" if cfg.model else ""
         return (
             f"{profile.binary} serve --hostname 127.0.0.1 --port <auto> "
@@ -1994,10 +1994,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
     if profile is not None and profile.hookless:
         print(
-            f"{profile.name}: hookless HTTP/SSE profile — probe-adapter finalizes "
+            f"{profile.name}: hookless profile — probe-adapter finalizes "
             "tmux/transcript-driven CLIs (hook dialects, transcript shapes) and has "
-            "nothing to collect here. The HTTP contract is documented in the "
-            "opencode_http adapter (src/bmad_loop/adapters/opencode_http.py).",
+            "nothing to collect here. Hookless adapter contracts are documented in "
+            "the adapter's own source (e.g. src/bmad_loop/adapters/opencode_http.py "
+            "for the built-in HTTP/SSE adapter).",
             file=sys.stderr,
         )
         return 1

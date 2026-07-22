@@ -356,7 +356,7 @@ def strip_legacy_hooks(config: dict) -> tuple[dict, int]:
 
 def _register_hooks(project: Path, profile: CLIProfile) -> int:
     if profile.hookless:
-        print(f"  no hooks needed ({profile.name}): HTTP/SSE transport")
+        print(f"  no hooks needed ({profile.name}): hookless profile")
         return 0
     config_path = project / profile.hooks.config_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -583,7 +583,7 @@ def provision_worktree(
             _copy_traversable(src, dst)
 
     # per-CLI signal-hook registration, baked to the main repo's relay (absolute).
-    # Hookless profiles (HTTP/SSE transport) have no config to merge.
+    # Hookless profiles have no hook config to merge.
     for profile in profiles:
         if profile.hookless:
             continue
