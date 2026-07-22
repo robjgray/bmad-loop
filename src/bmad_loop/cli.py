@@ -31,6 +31,7 @@ from . import (
     verify,
 )
 from .adapters.base import CodingCLIAdapter
+from .adapters.registry import get_cli_adapter
 from .checks import Finding, ValidationReport
 
 # The --json document builders live in documents.py (the library-level projection
@@ -156,18 +157,16 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                 # group; if so, dispatch to it. Otherwise fall back to the
                 # in-tree opencode-http adapter (the only built-in hookless
                 # adapter).
-                from .adapters.registry import get_cli_adapter
-
+                common = dict(
+                    run_dir=run_dir,
+                    policy=policy,
+                    profile=profile,
+                    extra_args=cfg.extra_args,
+                    usage_grace_s=cfg.usage_grace_s,
+                    stop_without_result_nudges=cfg.stop_without_result_nudges,
+                )
                 factory = get_cli_adapter(profile.name)
                 if factory is not None:
-                    common = dict(
-                        run_dir=run_dir,
-                        policy=policy,
-                        profile=profile,
-                        extra_args=cfg.extra_args,
-                        usage_grace_s=cfg.usage_grace_s,
-                        stop_without_result_nudges=cfg.stop_without_result_nudges,
-                    )
                     by_cfg[key] = (
                         factory.dev(**common, paths=paths)
                         if synthesizes
@@ -180,14 +179,6 @@ def _make_adapters(project: Path, run_dir: Path, policy) -> dict[str, CodingCLIA
                         OpencodeServerError,
                     )
 
-                    common = dict(
-                        run_dir=run_dir,
-                        policy=policy,
-                        profile=profile,
-                        extra_args=cfg.extra_args,
-                        usage_grace_s=cfg.usage_grace_s,
-                        stop_without_result_nudges=cfg.stop_without_result_nudges,
-                    )
                     try:
                         by_cfg[key] = (
                             OpencodeDevAdapter(**common, paths=paths)
@@ -450,40 +441,31 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     for profile in profiles:
         if profile.hookless:
-            # Check if an out-of-tree adapter is registered for this profile
-            # (bmad_loop.cli_adapters entry-point group). If so, it owns its
-            # own dependencies — the httpx check below is opencode-http only.
-            from .adapters.registry import get_cli_adapter
-            external_adapter = get_cli_adapter(profile.name)
-            if external_adapter is not None:
-                # Out-of-tree adapter: hookless, no httpx dependency, no hook
-                # registration. The adapter manages its own dependencies.
-                report.ok(
-                    "adapter.hookless",
-                    f"{profile.name}: hookless — no hook registration needed",
-                    {"profile": profile.name},
-                )
-                continue
+            # An out-of-tree adapter registered for this profile name owns
+            # its own dependencies (the httpx check below is opencode-http
+            # only); built-in hookless profiles are driven over HTTP/SSE.
+            extra = "" if get_cli_adapter(profile.name) else " (HTTP/SSE transport)"
             report.ok(
                 "adapter.hookless",
-                f"{profile.name}: hookless (HTTP/SSE transport) — no hook registration needed",
+                f"{profile.name}: hookless{extra} — no hook registration needed",
                 {"profile": profile.name},
             )
-            # The HTTP adapter needs httpx, which ships as an optional extra —
-            # surface a missing install here instead of at run start.
-            if importlib.util.find_spec("httpx") is not None:
-                report.ok(
-                    "adapter.httpx",
-                    f"httpx available for {profile.name}",
-                    {"profile": profile.name},
-                )
-            else:
-                report.fail(
-                    "adapter.httpx",
-                    f"{profile.name}: httpx not installed — "
-                    f"run `pip install 'bmad-loop[opencode]'`",
-                    {"profile": profile.name},
-                )
+            if extra:
+                # The HTTP adapter needs httpx, which ships as an optional extra —
+                # surface a missing install here instead of at run start.
+                if importlib.util.find_spec("httpx") is not None:
+                    report.ok(
+                        "adapter.httpx",
+                        f"httpx available for {profile.name}",
+                        {"profile": profile.name},
+                    )
+                else:
+                    report.fail(
+                        "adapter.httpx",
+                        f"{profile.name}: httpx not installed — "
+                        f"run `pip install 'bmad-loop[opencode]'`",
+                        {"profile": profile.name},
+                    )
             continue
         hook_config = project / profile.hooks.config_path
         hooks_ok = False

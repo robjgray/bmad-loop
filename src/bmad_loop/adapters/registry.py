@@ -5,7 +5,8 @@ an entry-point group (``bmad_loop.cli_adapters``) lets a co-installed package
 register adapter factories keyed by profile name, so ``_make_adapters`` can
 dispatch hookless profiles to the right adapter without hardcoding imports.
 A broken adapter package never breaks bmad-loop — import failures are recorded
-and surfaced by ``validate`` and ``diagnose``, not raised.
+and surfaced by ``validate`` and ``diagnose``, not raised. See
+:doc:`/docs/cli-adapters` for the adapter-author contract.
 """
 
 from __future__ import annotations
