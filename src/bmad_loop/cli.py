@@ -1953,7 +1953,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
     try:
         from .tui.app import run_tui
     except ModuleNotFoundError as e:
-        if (e.name or "").partition(".")[0] in ("textual", "tomlkit"):
+        if (e.name or "").partition(".")[0] in ("textual", "tomlkit", "rich", "pyte"):
             print(
                 "error: the TUI requires optional dependencies — uv tool install 'bmad-loop[tui]'",
                 file=sys.stderr,
