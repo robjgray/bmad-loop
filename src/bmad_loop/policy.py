@@ -946,7 +946,7 @@ source = "sprint-status"     # sprint-status | stories
 spec_folder = ""
 
 [adapter]
-name = "claude"              # claude | codex | gemini | copilot | antigravity | opencode-http (alias: opencode) | <custom .bmad-loop/profiles/*.toml>
+name = "claude"              # any profile bmad-loop can resolve: bundled (claude, codex, gemini, copilot, antigravity, opencode-http) or registered by a co-installed adapter package (see docs/cli-adapters.md)
 model = ""                   # empty = CLI default model (opencode-http wants "provider/model")
 cleanup_session_on_finish = true  # kill the run's tmux session when it finishes (false keeps it for inspection)
 # extra_args replaces the profile's default permission-bypass flags when set:

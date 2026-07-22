@@ -524,3 +524,6 @@ when absent, zero tokens spent.
 - [`adapters/generic.py`](../src/bmad_loop/adapters/generic.py) — the tmux +
   hook-signal adapter to reuse with a profile rather than subclass; also home of
   the `_ResultFileMixin` / `_DevSynthesisMixin` seams.
+- [CLI adapters](cli-adapters.md) — how an out-of-tree adapter package registers
+  itself via the `bmad_loop.cli_adapters` entry-point group so bmad-loop discovers
+  it automatically.

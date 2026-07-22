@@ -98,7 +98,9 @@ invokes inline — are present before a run starts.
 ## Choosing which CLIs to drive
 
 The supported adapters are `claude` (the default), `codex`, `gemini`, `copilot`, and
-`antigravity` (Google's `agy`, experimental — `isolation = "none"` only). You can pick more
+`antigravity` (Google's `agy`, experimental — `isolation = "none"` only). Additional
+adapters install as separate packages and register themselves automatically — see
+[CLI adapters](cli-adapters.md). You can pick more
 than one — register every CLI you intend to use for dev, review, or sweep triage.
 
 There are **two layers** here, and confusing them is the usual stumbling block:
@@ -176,7 +178,9 @@ bmad-loop init --project <project-root> --cli claude --cli codex --cli gemini
 
 Run with no `--cli` and `init` registers hooks for every CLI the `policy.toml` references,
 so a dual-client setup that's already configured in policy needs no extra flags. Names must
-be exactly `claude`, `codex`, `gemini`, `copilot`, or `antigravity` — `init` errors on an unknown profile and
+be a profile bmad-loop can resolve — bundled profiles (`claude`, `codex`, `gemini`, `copilot`,
+`antigravity`, `opencode-http`) or any registered by a co-installed adapter package
+(see [CLI adapters](cli-adapters.md)). `init` errors on an unknown profile and
 lists the valid ones.
 
 ### First-run notes

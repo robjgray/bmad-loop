@@ -102,3 +102,63 @@ def test_factory_pair_is_tuple():
     adapter = get_cli_adapter("test-cli")
     assert isinstance(adapter, tuple)
     assert len(adapter) == 2
+
+
+class _BrokenEP:
+    """Duck-typed entry point that raises on .load()."""
+    def __init__(self, name):
+        self.name = name
+
+    def load(self):
+        raise ImportError("No module named 'ghost_dependency'")
+
+
+class _GoodEP:
+    """Duck-typed entry point that registers an adapter on .load()."""
+    def __init__(self, name):
+        self.name = name
+
+    def load(self):
+        register_cli_adapter(
+            "good-adapter",
+            base_factory=_MockAdapter,
+            dev_factory=_MockDevAdapter,
+        )
+        return None
+
+
+def test_broken_entry_point_recorded_not_raised(monkeypatch):
+    """A broken adapter entry-point is recorded in errors, not raised.
+    The scan mechanics live in _entrypoints.py (shared with mux_backends);
+    this test pins that external_adapter_errors() routes them correctly
+    for the cli_adapters group."""
+    import bmad_loop.adapters._entrypoints as ep_mod
+
+    def fake_entry_points(*, group):
+        assert group == CLI_ADAPTERS_GROUP
+        return [_BrokenEP("broken-adapter")]
+
+    monkeypatch.setattr(ep_mod.importlib.metadata, "entry_points", fake_entry_points)
+    reset_group(CLI_ADAPTERS_GROUP)
+
+    # get_cli_adapter triggers the scan; broken EP must not raise
+    assert get_cli_adapter("broken-adapter") is None
+    errors = external_adapter_errors()
+    assert "broken-adapter" in errors
+    assert "ghost_dependency" in errors["broken-adapter"]
+
+
+def test_one_broken_package_does_not_hide_the_rest(monkeypatch):
+    """Per-entry isolation: a working adapter still registers alongside a broken one."""
+    import bmad_loop.adapters._entrypoints as ep_mod
+
+    def fake_entry_points(*, group):
+        assert group == CLI_ADAPTERS_GROUP
+        return [_BrokenEP("broken-adapter"), _GoodEP("good-adapter")]
+
+    monkeypatch.setattr(ep_mod.importlib.metadata, "entry_points", fake_entry_points)
+    reset_group(CLI_ADAPTERS_GROUP)
+
+    assert get_cli_adapter("good-adapter") is not None
+    errors = external_adapter_errors()
+    assert list(errors) == ["broken-adapter"]
